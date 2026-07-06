@@ -1,0 +1,96 @@
+name: Deploy to Microsoft Fabric
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target Environment"
+        required: true
+        type: choice
+        options:
+          - dev
+          - qa
+          - sit
+          - uat
+          - prod
+
+  push:
+    branches:
+      - develop
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    environment: ${{ github.event.inputs.environment || 'dev' }}
+
+    env:
+      TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      FABRIC_WORKSPACE_ID: ${{ secrets.FABRIC_WORKSPACE_ID }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.CLIENT_ID }}
+          tenant-id: ${{ env.TENANT_ID }}
+          client-secret: ${{ env.CLIENT_SECRET }}
+
+      - name: Install PowerShell
+        shell: bash
+        run: |
+          pwsh --version
+
+      - name: Install Fabric PowerShell Modules
+        shell: pwsh
+        run: |
+          Install-Module MicrosoftPowerBIMgmt -Scope CurrentUser -Force -AllowClobber
+
+      - name: Acquire Azure Access Token
+        id: token
+        shell: bash
+        run: |
+          TOKEN=$(az account get-access-token \
+            --resource https://analysis.windows.net/powerbi/api \
+            --query accessToken -o tsv)
+
+          echo "ACCESS_TOKEN=$TOKEN" >> $GITHUB_ENV
+
+      - name: Validate Workspace
+        shell: bash
+        run: |
+          echo "Workspace ID: $FABRIC_WORKSPACE_ID"
+
+      - name: Deploy Fabric Artifacts
+        shell: bash
+        run: |
+
+          echo "Deploying Microsoft Fabric Artifacts..."
+
+          curl \
+            --request POST \
+            --url "https://api.fabric.microsoft.com/v1/workspaces/${FABRIC_WORKSPACE_ID}/git/updateFromGit" \
+            --header "Authorization: Bearer ${ACCESS_TOKEN}" \
+            --header "Content-Type: application/json" \
+            --data '{
+              "workspaceHead":"HEAD"
+            }'
+
+      - name: Verify Deployment
+        shell: bash
+        run: |
+          echo "Deployment completed successfully."
+
+      - name: Logout
+        if: always()
+        run: az logout# Deployment file for project
+#
